@@ -1,0 +1,35 @@
+Sun  1 Jan 2012 16:02:17 EST
+
+Tim Brecht
+
+The idea of this directory is to collect Waterloo created
+programs here so that when moving to new versions of OS161
+we have them all in one place and we know what we need
+to move/port. It structure and functionality is
+similar to the testbin except to simply the
+Makefile in each directory they all include uw-prog.mk
+from this directory.
+
+I'm starting by trying to add a few of the programs that
+get used by some of the automated testing scripts.
+
+syscall   - example program: how a syscall works used in the course notes
+segments  - example program: how different segments used in the course notes
+argtest   - is a useful program that I ask people to use when 
+            when trying to implement argc/argv.
+
+vm-funcs  - code that is used by some of the vm-* tests
+vm-*      - are a bunch of different test programs I wrote
+            to try to test the VM subsystem for assignment 3.
+
+lib       - some libraries that are used by some other programs
+files1    - test a number of relatively simple case for
+files2      open, close, read and write
+writeread - write stuff to a file and then read it and ensure what
+            is read matches what was written
+conc-io   - tests concurrent writes and atomicity
+
+romewrite  - tries to write to read only memory
+tlbfaulter - create and use an array larger than will fit in the TLB
+             but should fit in memory and should force TLB replacements
+sparse     - declare a large array but only use a small part of it

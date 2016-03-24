@@ -1,0 +1,43 @@
+My-Testbin Documentation
+
+NOTE: You must use bmake for building programs
+in this directory.
+
+The my-testbin folder is designed to be recompiled with the
+remainder of the testcases or on its own.  
+Whenever bmake <depend|clean|all|install> in the main/toplevel
+os161 directory, my-testbin will be recompiled.
+
+The compilation process iterates over all subdirectories in
+my-testbin, compiling and linking the code within them.
+The final executable will have the name specified
+within the Makefile in the subdirectory (usually the same
+name as the directory).  This, would mean that each test case
+would be uniquly identified by the folder name.
+
+HOWTOs:
+
+Create a new Testcase:
+
+* Create a new folder in my-testbin
+* Add the .c and .h source to that directory
+* Go to my-testbin and execute `bmake`
+* Finally run `bmake install` to copy the binaries to 
+  root/my-testbin
+
+Running new testcases:
+
+* The new testcases will be installed in root/my-testbin
+* run them with the "p my-testbin/<testname>" options
+  to the kernel.
+
+See the Makefile in this directory and example/Makefile
+for and example of how to add new programs.
+
+It is probably simplest to put each program in a 
+separate directory. You can copy the Makefile from
+the example directory and then modify the line 
+that defines the program name to the name
+of the new program.
+
+    PROG=example

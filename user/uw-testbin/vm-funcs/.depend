@@ -1,0 +1,4 @@
+
+$(MYBUILDDIR)/vm-funcs.o: \
+ vm-funcs.c
+

@@ -1,0 +1,326 @@
+#include <types.h>
+#include <lib.h>
+#include <synchprobs.h>
+#include <synch.h>
+
+/* 
+ * This simple default synchronization mechanism allows only creature at a time to
+ * eat.   The globalCatMouseSem is used as a a lock.   We use a semaphore
+ * rather than a lock so that this code will work even before locks are implemented.
+ */
+
+/* 
+ * Replace this default synchronization mechanism with your own (better) mechanism
+ * needed for your solution.   Your mechanism may use any of the available synchronzation
+ * primitives, e.g., semaphores, locks, condition variables.   You are also free to 
+ * declare other global variables if your solution requires them.
+ */
+
+static const bool DEBUG = 0;
+
+register struct thread* curthread asm("$23");
+
+//locks
+static struct lock *globalLock; // lock for global variables
+
+//CVs
+static struct cv *queues[2];
+
+//
+static volatile bool *bowlAvailable;
+
+static volatile int totalBowls;
+
+static volatile int eating[2];
+
+static volatile int waiting[2];
+
+static volatile int counter;
+
+static volatile int next;
+//cats = 0, mice = 1, any = 2
+
+static void beginScheduler(int who, unsigned int bowlIndex)
+{   
+    lock_acquire(globalLock);
+
+    if(DEBUG)
+        kprintf("%p beginScheduler with %d, %d \n", curthread, who, bowlIndex);
+
+    int other = (who + 1)%2;
+
+    if(DEBUG)
+        kprintf("%p -global vars %d, %d, %d, %d, %d, %d \n", curthread, counter, next, eating[0], eating[1], waiting[0], waiting[1]);
+
+    if(DEBUG)
+        kprintf("%p -waiting on %d, %d, %d \n", curthread, eating[other] == 0, next, bowlAvailable[bowlIndex]);
+    
+    while(! (eating[other] == 0 && (next == 2 || next == who) && bowlAvailable[bowlIndex]) )
+    {
+        ++waiting[who];
+        cv_wait(queues[who],globalLock);
+        --waiting[who];
+    }
+
+    if(DEBUG)
+        kprintf("%p -done waiting \n", curthread);
+
+    if(next == 2)
+    {
+        next = who;
+    }
+    
+    ++counter;
+    
+    if(counter >= totalBowls && waiting[other] > 0)
+    {
+        next = other;
+        counter = 0;
+    }
+    
+    bowlAvailable[bowlIndex] = 0;
+    
+    ++eating[who];
+    
+    if(DEBUG)
+        kprintf("%p begin eating\n", curthread);
+
+    lock_release(globalLock);
+}
+
+static void endScheduler(int who, unsigned int bowlIndex)
+{
+    lock_acquire(globalLock);
+
+    if(DEBUG)
+        kprintf("%p endScheduler with %d, %d \n",curthread, who, bowlIndex);
+    
+    int other = (who + 1)%2;
+
+    if(DEBUG)
+        kprintf("%p -global vars %d, %d, %d, %d, %d, %d \n", curthread, counter, next, eating[0], eating[1], waiting[0], waiting[1]);
+    
+    bowlAvailable[bowlIndex] = 1;
+    
+    --eating[who];
+    
+    //no one is eating
+    if(eating[who] == 0)
+    {
+        if(DEBUG)
+            kprintf("%p -no one is eating. %d, %d, %d\n",curthread, waiting[who], waiting[other],next);
+        if(waiting[who] > 0 && next == who)
+        {
+            if(DEBUG)
+                kprintf("%p -waking next %d in line\n",curthread,who);
+            
+            cv_broadcast(queues[who],globalLock);
+        }
+        else if(waiting[who] == 0 && waiting[other] == 0)
+        {
+            if(DEBUG)
+                kprintf("%p -everyone can eat next \n",curthread);
+            
+            next = 2;
+        }
+        else if(next == other && waiting[other] > 0)
+        {
+            if(DEBUG)
+                kprintf("%p -self %d, waking other %d\n",curthread,who,other);
+            
+            cv_broadcast(queues[other],globalLock);
+        }
+        else if(next == who && waiting[who] == 0 && waiting[other] > 0)
+        {
+            if(DEBUG)
+                kprintf("%p -waking other %d\n",curthread,other);
+            
+            next = other;
+            counter = 0;
+            cv_broadcast(queues[other],globalLock);
+        }
+    }
+    //someone is still eating
+    else
+    {
+        if(DEBUG)
+            kprintf("%p -someone is eating \n",curthread);
+        if(next == who)
+        {
+            if(DEBUG)
+                kprintf("%p -waking %d\n",curthread,who);
+            cv_broadcast(queues[who],globalLock);
+        }
+    }
+
+    if(DEBUG)
+        kprintf("%p end eating\n", curthread);
+    lock_release(globalLock);
+}
+
+/* 
+ * The CatMouse simulation will call this function once before any cat or
+ * mouse tries to each.
+ *
+ * You can use it to initialize synchronization and other variables.
+ * 
+ * parameters: the number of bowls
+ */
+void
+catmouse_sync_init(int bowls)
+{
+    globalLock = lock_create("globalLock");
+    if(globalLock == NULL)
+    {
+        panic("catmouse_sync_init: could not create globalLock\n");
+    }
+
+    queues[0] = cv_create("catsQueue");
+    if(queues[0] == NULL)
+    {
+        panic("catmouse_sync_init: could not create catsQueue\n");
+    }
+
+    queues[1] = cv_create("miceQueue");
+    if(queues[1] == NULL)
+    {
+        panic("catmouse_sync_init: could not create miceQueue\n");
+    }
+
+    bowlAvailable = kmalloc(bowls*sizeof(bool));
+    if(bowlAvailable == NULL)
+    {
+        panic("catmouse_sync_init: unable to allocate space for bowlAvailable \n");
+    }
+    for(int i = 0; i < bowls; ++i)
+    {
+        bowlAvailable[i] = 1;
+    }
+
+    totalBowls = bowls;
+
+    eating[0] = 0;
+    eating[1] = 0;
+
+    waiting[0] = 0;
+    waiting[1] = 0;
+    
+    counter = 0;
+
+    next = 2;
+
+    return;
+}
+
+/* 
+ * The CatMouse simulation will call this function once after all cat
+ * and mouse simulations are finished.
+ *
+ * You can use it to clean up any synchronization and other variables.
+ *
+ * parameters: the number of bowls
+ */
+void
+catmouse_sync_cleanup(int bowls)
+{
+
+    (void)bowls;
+
+    if(globalLock != NULL)
+    {
+        lock_destroy(globalLock);
+        globalLock = NULL;
+    }
+
+    if(queues[0] != NULL)
+    {
+        cv_destroy(queues[0]);
+        queues[0] = NULL;
+    }
+
+    if(queues[1] != NULL)
+    {
+        cv_destroy(queues[1]);
+        queues[1] = NULL;
+    }
+
+    if(bowlAvailable != NULL)
+    {
+        kfree((void *)bowlAvailable);
+    }
+}
+
+
+/*
+ * The CatMouse simulation will call this function each time a cat wants
+ * to eat, before it eats.
+ * This function should cause the calling thread (a cat simulation thread)
+ * to block until it is OK for a cat to eat at the specified bowl.
+ *
+ * parameter: the number of the bowl at which the cat is trying to eat
+ *             legal bowl numbers are 1..NumBowls
+ *
+ * return value: none
+ */
+
+void
+cat_before_eating(unsigned int bowl) 
+{
+    beginScheduler(0,bowl-1);
+}
+
+/*
+ * The CatMouse simulation will call this function each time a cat finishes
+ * eating.
+ *
+ * You can use this function to wake up other creatures that may have been
+ * waiting to eat until this cat finished.
+ *
+ * parameter: the number of the bowl at which the cat is finishing eating.
+ *             legal bowl numbers are 1..NumBowls
+ *
+ * return value: none
+ */
+
+void
+cat_after_eating(unsigned int bowl) 
+{
+    endScheduler(0, bowl-1);
+}
+
+/*
+ * The CatMouse simulation will call this function each time a mouse wants
+ * to eat, before it eats.
+ * This function should cause the calling thread (a mouse simulation thread)
+ * to block until it is OK for a mouse to eat at the specified bowl.
+ *
+ * parameter: the number of the bowl at which the mouse is trying to eat
+ *             legal bowl numbers are 1..NumBowls
+ *
+ * return value: none
+ */
+
+void
+mouse_before_eating(unsigned int bowl) 
+{
+    beginScheduler(1,bowl-1);
+}
+
+/*
+ * The CatMouse simulation will call this function each time a mouse finishes
+ * eating.
+ *
+ * You can use this function to wake up other creatures that may have been
+ * waiting to eat until this mouse finished.
+ *
+ * parameter: the number of the bowl at which the mouse is finishing eating.
+ *             legal bowl numbers are 1..NumBowls
+ *
+ * return value: none
+ */
+
+void
+mouse_after_eating(unsigned int bowl) 
+{
+    endScheduler(1, bowl-1);
+}
